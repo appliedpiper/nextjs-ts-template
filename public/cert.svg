@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <!-- White background circle -->
+  <circle cx="96" cy="96" r="94" fill="white" stroke="none"/>
+  
+  <!-- Certificate/Document background -->
+  <rect x="48" y="36" width="96" height="120" rx="4" fill="none" stroke="currentColor" stroke-width="8"/>
+  
+  <!-- Document lines -->
+  <line x1="64" y1="60" x2="128" y2="60" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+  <line x1="64" y1="80" x2="128" y2="80" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+  <line x1="64" y1="100" x2="104" y2="100" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+  
+  <!-- Ribbon badge circle -->
+  <circle cx="120" cy="100" r="36" fill="none" stroke="currentColor" stroke-width="8"/>
+  
+  <!-- Ribbon tails -->
+  <path d="M 96 132 L 88 156 M 144 132 L 152 156" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
+  
+  <!-- Ribbon lines (decorative X) -->
+  <line x1="100" y1="92" x2="140" y2="108" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+  <line x1="140" y1="92" x2="100" y2="108" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+</svg>
