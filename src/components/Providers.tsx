@@ -1,12 +1,12 @@
 'use client';
 
 import { ClerkProvider } from '@clerk/nextjs'
-import { ThemeProvider, CssBaseline, createTheme } from '@mui/material';
+import { ThemeProvider, CssBaseline } from '@mui/material';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AppRouterCacheProvider } from "@mui/material-nextjs/v14-appRouter";
 import { useState } from 'react';
 
-const theme = createTheme();
+import { theme } from '@/lib/theme';
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
