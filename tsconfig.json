@@ -14,8 +14,8 @@
       "esnext"
     ],
     "types": [
-      "jest",
-      "node"
+      "node",
+      "vitest/globals"
     ],
     // Recommended Settings
     "allowJs": true,
