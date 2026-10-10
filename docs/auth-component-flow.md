@@ -57,52 +57,69 @@ Next.js 16 renamed middleware to *proxy*; `src/proxy.ts` is the former
 the MUI/Emotion cache for the App Router, TanStack Query, then the MUI theme and
 `CssBaseline`.
 
+Below that, the tree forks on **whether the route is inside the `(app)` route
+group**. Inside, it gets the shared application chrome; outside, it renders bare.
+`(app)` adds no URL segment — see [`layout.md`](./layout.md).
+
 ```mermaid
 flowchart TD
     LAYOUT["RootLayout<br/>src/app/layout.tsx"]
     PROVIDERS["Providers<br/>src/components/Providers.tsx"]
     THEME["MUI theme<br/>src/lib/theme.ts"]
 
-    SIGNINPAGE["/sign-in — Page<br/>src/app/sign-in/page.tsx"]
+    SIGNINPAGE["/sign-in — Page, outside (app)<br/>src/app/sign-in/page.tsx"]
     PANEL["SignInPanel, client<br/>src/components/auth/SignInPanel.tsx"]
     WIDGET["Clerk SignIn widget<br/>appearance derived from the MUI theme"]
 
-    HOMEPAGE["/ — Page<br/>src/app/page.tsx"]
-    USERS1["Users, client<br/>src/components/Users/Users.tsx"]
+    GROUP["(app) group layout<br/>src/app/(app)/layout.tsx"]
+    DEFAULT["DefaultLayout, server<br/>components/layout/DefaultLayout.tsx"]
+    ROLE["getCurrentRole + visibleNavFor<br/>role-filters the nav"]
+    SHELL["AppShell, client<br/>header + sidebar + main"]
 
-    ADMINLAYOUT["/admin/* — AdminSegmentLayout<br/>src/app/admin/layout.tsx"]
+    HOMEPAGE["/ — Page<br/>src/app/(app)/page.tsx"]
+    USERS1["Users, client"]
+
+    ADMINGUARD["/admin/* — AdminSegmentLayout<br/>src/app/(app)/admin/layout.tsx"]
     GUARD["requireRole admin<br/>src/lib/auth/requireRole.ts"]
-    CHROME["AdminLayout, client<br/>src/components/layout/AdminLayout.tsx"]
-    ADMINPAGE["Page<br/>src/app/admin/users/page.tsx"]
-    USERS2["Users, client<br/>src/components/Users/Users.tsx"]
+    ADMINPAGE["Page<br/>src/app/(app)/admin/users/page.tsx"]
+    USERS2["Users, client"]
 
     LAYOUT --> PROVIDERS
     PROVIDERS -.-> THEME
     PROVIDERS --> SIGNINPAGE
-    PROVIDERS --> HOMEPAGE
-    PROVIDERS --> ADMINLAYOUT
+    PROVIDERS --> GROUP
 
     SIGNINPAGE --> PANEL
     PANEL --> WIDGET
 
+    GROUP --> DEFAULT
+    DEFAULT -.-> ROLE
+    DEFAULT --> SHELL
+    SHELL --> HOMEPAGE
+    SHELL --> ADMINGUARD
+
     HOMEPAGE --> USERS1
 
-    ADMINLAYOUT --> GUARD
-    ADMINLAYOUT --> CHROME
-    CHROME --> ADMINPAGE
+    ADMINGUARD --> GUARD
+    ADMINGUARD --> ADMINPAGE
     ADMINPAGE --> USERS2
 ```
+
+Note that `AdminSegmentLayout` is now **only a guard** — it calls `requireRole`
+and renders its children. The chrome comes from the `(app)` group above it, so
+there is no longer a separate admin layout component.
 
 ### Routes at a glance
 
 | Route | Access | What renders | Entry file |
 | --- | --- | --- | --- |
-| `/sign-in` | Public — the only route reachable without a session | Clerk's widget centred in the viewport, restyled to the MUI theme | `src/app/sign-in/page.tsx` |
-| `/` | Any signed-in user; the role claim is not consulted | Bare `<h1>Users</h1>` and the user list, with no app chrome | `src/app/page.tsx` |
-| `/admin/users` | `admin` only, checked at the proxy *and* in the layout | MUI AppBar and collapsible Drawer around the user list | `src/app/admin/users/page.tsx` |
+| `/sign-in` | Public — the only route reachable without a session | Clerk's widget centred in the viewport, restyled to the MUI theme. **No app chrome.** | `src/app/sign-in/page.tsx` |
+| `/` | Any signed-in user; the role claim is not consulted | The user list inside the app layout | `src/app/(app)/page.tsx` |
+| `/admin/users` | `admin` only, checked at the proxy *and* in the segment layout | The user list inside the app layout, with Users highlighted in the sidebar | `src/app/(app)/admin/users/page.tsx` |
 
-`/sign-in` is prerendered as static; `/admin/users` renders dynamically because
-its layout calls `auth()`.
+`/sign-in` is prerendered as static. **Everything inside `(app)` renders
+dynamically**, because the group layout calls both `auth()` and `cookies()` — so
+`/` is now dynamic too, where it used to be static.
 
 ---
 
@@ -151,11 +168,21 @@ flowchart LR
 | `decideAccess` | `src/lib/auth/access.ts` | Every matched request | The entire policy, as a pure function. Also owns public and admin path matching. |
 | roles | `src/lib/auth/roles.ts` | Policy and guards | Role vocabulary and safe claim parsing; unrecognised values resolve to no role. |
 | `requireRole` | `src/lib/auth/requireRole.ts` | `/admin/*` layout | Resource-level guard for server components, so the segment stays protected if the matcher changes. |
+| `getCurrentRole` | `src/lib/auth/requireRole.ts` | `(app)` group layout | Reads the role **without** redirecting, for deciding what to display. |
 | Session claim types | `src/types/globals.d.ts` | Compile time | Declares the token's `metadata.role` shape — optional, because it is genuinely absent until configured. |
 
+### The layout also reads the role — for display only
+
+`DefaultLayout` calls `getCurrentRole()` and filters the navigation with
+`visibleNavFor(role)`. This is **presentation, not enforcement**: it hides links a
+user shouldn't see, and does nothing to stop them reaching the URL directly.
+Enforcement remains the proxy and `requireRole`. See
+[`layout.md`](./layout.md#4-role-visibility).
+
 Tests sit beside each module: `access.test.ts`, `roles.test.ts`,
-`requireRole.test.ts`, `src/proxy.test.ts`, and
-`src/components/auth/SignInPanel.test.tsx`. Run them with `pnpm test`.
+`requireRole.test.ts`, `src/proxy.test.ts`,
+`src/components/auth/SignInPanel.test.tsx`, and the layout suite under
+`src/components/layout/`. Run them with `pnpm test`.
 
 ---
 
@@ -175,6 +202,12 @@ including real admins. See [`auth.md`](./auth.md) for assigning roles.
 `src/lib/auth/access.ts`. The proxy and the layout guards both read from it, so
 one edit covers the edge and the resource.
 
+**Adding a nav entry is a separate, non-security change.** `NAV_SECTIONS` in
+`src/lib/navigation/navigation.ts` controls what is *shown*. A new admin page needs
+**both** a guard and a nav entry; adding the entry alone shows a link without
+protecting it, and adding the guard alone protects a page nobody can find. See
+[`layout.md`](./layout.md#3-adding-a-navigation-entry).
+
 **The backend is still open.** These gates protect pages and the internal API
 route only. The GraphQL server has no token verification and remains directly
 reachable on port 4000, so a signed-out client can still query it. Tracked as
@@ -183,8 +216,12 @@ the next task, not fixed here.
 **No sign-up route.** Nothing serves `/sign-up`, so the widget's sign-up link
 bounces back to sign-in. Create accounts from the Clerk Dashboard for now.
 
-**`/users` has moved.** It was previously served by an `(admin)` route group,
-whose parentheses added no URL segment. It is now genuinely `/admin/users`.
+**Two route-group moves have happened — URLs did not change the second time.**
+`/users` was once served by an `(admin)` route group whose parentheses added no URL
+segment; it is now genuinely `/admin/users`. Separately, `page.tsx` and `admin/`
+later moved into an `(app)` group to pick up the shared layout — that move changed
+**no** URLs, because `(app)` is also a group. Confirmed against the production
+route table.
 
 **Defined but never imported.** Three files are unreferenced — left in place, but
 don't assume they're wired in:

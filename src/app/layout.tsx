@@ -1,4 +1,5 @@
 import Providers from "@/components/Providers";
+import { APP_NAME } from "@/lib/appConfig";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -14,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NextJS Frontend Template",
+  title: APP_NAME,
   description: "Frontend template for NextJS projects",
   icons: {
     icon: "/cert.svg",

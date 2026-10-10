@@ -3,6 +3,8 @@
 import { SignIn } from '@clerk/nextjs';
 import { Box, useTheme } from '@mui/material';
 
+import { clerkAppearanceVariables } from '@/lib/clerkAppearance';
+
 /**
  * Clerk's <SignIn /> widget, centered in the viewport and restyled to match the
  * MUI theme.
@@ -28,20 +30,7 @@ export default function SignInPanel() {
     >
       <SignIn
         appearance={{
-          variables: {
-            colorPrimary: theme.palette.primary.main,
-            colorTextOnPrimaryBackground: theme.palette.primary.contrastText,
-            colorText: theme.palette.text.primary,
-            colorTextSecondary: theme.palette.text.secondary,
-            colorBackground: theme.palette.background.paper,
-            colorInputBackground: theme.palette.background.paper,
-            colorInputText: theme.palette.text.primary,
-            colorDanger: theme.palette.error.main,
-            colorSuccess: theme.palette.success.main,
-            colorWarning: theme.palette.warning.main,
-            fontFamily: theme.typography.fontFamily,
-            borderRadius: `${theme.shape.borderRadius}px`,
-          },
+          variables: clerkAppearanceVariables(theme),
           elements: {
             cardBox: { boxShadow: theme.shadows[8] },
           },
