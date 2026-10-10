@@ -20,9 +20,9 @@ Enforcement happens in two places:
 1. **At the edge** — `src/proxy.ts` runs before rendering and redirects
    unauthorized requests. This is what makes an unauthenticated visitor land on
    `/sign-in` without having to navigate there.
-2. **At the resource** — `src/app/admin/layout.tsx` calls `requireRole("admin")`
-   before rendering. The admin segment stays protected even if the proxy matcher
-   is later changed or narrowed.
+2. **At the resource** — `src/app/(app)/admin/layout.tsx` calls
+   `requireRole("admin")` before rendering. The admin segment stays protected even
+   if the proxy matcher is later changed or narrowed.
 
 Both read the same policy from `src/lib/auth/access.ts`, so there is one place to
 change a rule.
@@ -123,7 +123,11 @@ Prefixes match the whole subtree, so `/sign-in` also covers
 `/sign-in/factor-one`.
 
 To gate a route on a role, put it under `/admin/*` — that is the whole
-convention, and the existing `src/app/admin/layout.tsx` guard covers it.
+convention, and the existing `src/app/(app)/admin/layout.tsx` guard covers it.
+
+Gating a route does **not** add it to the sidebar, and adding it to the sidebar
+does not gate it. Those are separate changes; see
+[`layout.md`](./layout.md#4-role-visibility).
 
 For a role check somewhere else, use the helpers rather than reading claims by
 hand.
@@ -171,7 +175,8 @@ TypeScript will point at everything that needs updating.
 | `src/lib/auth/roles.ts` | Role vocabulary and safe session-claim parsing. |
 | `src/lib/auth/requireRole.ts` | Server-side guards for pages and layouts. |
 | `src/types/globals.d.ts` | Types the session token's `metadata.role`. |
-| `src/app/admin/layout.tsx` | Applies `requireRole("admin")` to `/admin/*`. |
+| `src/app/(app)/admin/layout.tsx` | Applies `requireRole("admin")` to `/admin/*`. Guard only — chrome comes from the `(app)` group. |
+| `src/components/layout/DefaultLayout.tsx` | Reads the role to filter navigation. Display only, **not** enforcement. |
 | `src/components/auth/SignInPanel.tsx` | The custom-styled sign-in page. |
 
 ---

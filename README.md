@@ -1,10 +1,15 @@
 # Frontend
 
 Next.js 16 App Router frontend with Clerk authentication, role-based route
-protection, MUI components, and a typed GraphQL data layer.
+protection, a shared application layout, MUI components, and a typed GraphQL data
+layer.
 
 Every route requires a signed-in user by default. Routes under `/admin/*`
 additionally require the `admin` role. See [`docs/auth.md`](./docs/auth.md).
+
+Every signed-in page renders inside a shared shell — collapsible sidebar, header,
+content column — whose navigation and header items vary by role. See
+[`docs/layout.md`](./docs/layout.md).
 
 ## Stack
 
@@ -85,8 +90,17 @@ viewport, restyled from the MUI theme in `src/lib/theme.ts`. Editing that theme
 restyles the sign-in page too — the appearance variables are derived from it
 rather than hardcoded.
 
-**Admin area.** `/admin/*` renders inside an MUI AppBar and collapsible Drawer
-and requires the `admin` role. `/admin/users` lists users from the backend.
+**Default application layout.** Every page under `src/app/(app)/` renders inside a
+shared shell: a sidebar that collapses to an icon rail (or an overlay on mobile), a
+header with a breadcrumb and the Clerk user menu, and a content column. Navigation
+is a data registry in `src/lib/navigation/navigation.ts`, filtered by role on the
+server so a non-admin's browser never receives admin entries. `[` toggles the
+sidebar, and the collapsed state persists in a cookie so it survives a reload
+without flashing. Documented in [`docs/layout.md`](./docs/layout.md), including how
+to add an entry and why hiding a link is **not** the same as protecting a route.
+
+**Admin area.** `/admin/*` requires the `admin` role, enforced at the edge and
+again in the segment's own layout. `/admin/users` lists users from the backend.
 
 **Typed GraphQL data layer.** TanStack Query hooks call an internal
 `/api/graphql` route handler, which forwards to the real GraphQL server. The
@@ -96,9 +110,16 @@ browser never talks to the backend directly.
 
 | Route | Access | What it shows |
 | --- | --- | --- |
-| `/sign-in` | Public | Custom-styled Clerk sign-in |
-| `/` | Any signed-in user | User list, no app chrome |
-| `/admin/users` | `admin` only | User list inside the admin layout |
+| `/sign-in` | Public | Custom-styled Clerk sign-in — deliberately **no** app chrome |
+| `/` | Any signed-in user | User list, inside the app layout |
+| `/admin/users` | `admin` only | User list, inside the app layout |
+
+Routes that should render inside the app layout live under `src/app/(app)/`. The
+parentheses make it a route group, which adds **no URL segment** — `(app)/admin/users`
+serves `/admin/users`. `/sign-in` sits outside the group.
+
+Every route inside the group is server-rendered on demand, because the layout reads
+the session and a cookie. `/sign-in` stays static.
 
 There is no `/sign-up` route yet — create accounts from the Clerk Dashboard.
 
@@ -107,17 +128,26 @@ There is no `/sign-up` route yet — create accounts from the Clerk Dashboard.
 ```
 src/
 ├── app/                    # App Router routes
-│   ├── layout.tsx          # Root layout — wraps everything in Providers
-│   ├── page.tsx            # /
-│   ├── sign-in/            # /sign-in
-│   ├── admin/              # /admin/* — admin-only segment
+│   ├── layout.tsx          # Root layout — Providers only, no chrome
+│   ├── (app)/              # Route group: everything here gets the app layout
+│   │   ├── layout.tsx      #   renders DefaultLayout
+│   │   ├── page.tsx        #   /
+│   │   └── admin/          #   /admin/* — admin-only segment (guard only)
+│   ├── sign-in/            # /sign-in — outside the group, so no chrome
 │   └── api/graphql/        # Route handler forwarding to the GraphQL backend
-├── components/             # React components
+├── components/
+│   ├── auth/               # SignInPanel
+│   ├── layout/             # DefaultLayout, AppShell, AppHeader, AppSidebar
+│   └── Users/              # Feature components
 ├── lib/
 │   ├── auth/               # Authorization policy, role helpers, guards
+│   ├── navigation/         # Nav registry + pure role filtering
+│   ├── layout/             # Sidebar collapse preference (cookie)
 │   ├── api/                # TanStack Query hooks, queries, cache keys
 │   ├── graphql/            # GraphQL fetch client
 │   ├── env/                # Zod-validated environment access
+│   ├── clerkAppearance.ts  # Maps the MUI theme onto Clerk's appearance
+│   ├── appConfig.ts        # APP_NAME
 │   └── theme.ts            # MUI theme — single source of truth
 ├── types/                  # Ambient type declarations
 └── proxy.ts                # Auth gate (Next.js 16's renamed middleware)
@@ -135,12 +165,19 @@ pnpm test
 ```
 
 The suite covers the authorization policy, the proxy adapter, the server-side
-role guard, session-claim parsing, and the sign-in page. Both enforcement layers
-are tested independently.
+role guard, session-claim parsing, the sign-in page, and the whole application
+layout — the nav registry and its role filtering, each piece of chrome in
+isolation, and the composed tree. Both enforcement layers are tested
+independently.
+
+Note that **jsdom does not evaluate `@media` queries**, so the layout's responsive
+breakpoints are deliberately not asserted by the suite — they need a real browser.
+See [`docs/layout.md`](./docs/layout.md#7-testing-notes).
 
 ## Documentation
 
 - [`docs/auth.md`](./docs/auth.md) — auth flow, roles, assigning roles, adding protected routes
+- [`docs/layout.md`](./docs/layout.md) — the app layout, adding nav entries, role visibility, sidebar behaviour
 - [`docs/auth-component-flow.md`](./docs/auth-component-flow.md) — diagrams of the request lifecycle and component tree
 
 ## Known gaps
@@ -150,5 +187,12 @@ This is a POC. Deliberately unfinished:
 - **The GraphQL backend has no token verification.** Protecting these pages does
   nothing for it; it remains directly reachable and a signed-out client can
   still query it.
-- **No `/sign-up` route.** Accounts are created from the Clerk Dashboard.
+- **No `/sign-up` route.** Accounts are created from the Clerk Dashboard, and
+  nothing assigns a role at creation — a new account is role-less until someone
+  sets `public_metadata` by hand.
+- **The layout has not been checked in a real browser**, at any viewport. It is
+  covered by tests and verified server-side, but the responsive behaviour is
+  unproven.
+- **`/` duplicates `/admin/users`.** Both render the same user list inside the same
+  chrome; `/` wants a real landing page.
 - **No CI, staging environment, or API rate limiting.**
