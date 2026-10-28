@@ -86,8 +86,13 @@ this first.
 
 ## Assigning a role to a user
 
-There is **no admin account yet.** Nothing in the codebase creates one, and no
-sign-up route exists, so the first admin has to be made by hand:
+Two different jobs, and only the first needs the Clerk Dashboard.
+
+### Bootstrapping the first admin — Dashboard, once per instance
+
+Nothing in the codebase creates an admin, and there is no sign-up route, so the
+very first one has to be made by hand. There is no way around this: granting the
+first admin from inside the app would mean an unauthenticated path to admin.
 
 1. In the Clerk Dashboard, go to **Users**.
 2. If no users exist, click **Create user** and set an email and password.
@@ -99,17 +104,51 @@ sign-up route exists, so the first admin has to be made by hand:
    { "role": "admin" }
    ```
 
-5. Save, then sign in to the app and visit `/admin/users`.
+5. Save, then sign in to the app and visit `/admin/access`.
 
-Use `{ "role": "user" }` for a regular account, or leave metadata empty — an
-empty role behaves the same as `user`.
+### Promoting everyone else — `/admin/access`
+
+Once one admin exists, do the rest in the app. **Administration → Access** lists
+every Clerk account with its current role and a dropdown to change it. Selecting
+a role saves immediately; there is no Save button.
+
+What the page will not let you do, and why:
+
+| Behaviour | Reason |
+| --- | --- |
+| **Your own row is locked** | An admin who demotes themselves can leave the portal with no admin, with no way back except the Dashboard. To step down, have another admin do it. |
+| **"no role" is shown but cannot be chosen** | It reports empty `public_metadata`, which is what every hand-created account starts with. It is a state, not a role — `ROLES` has no such member. |
+| **Only `admin` and `user` are offered** | The server action re-validates against `ROLES` and rejects anything else, so a crafted request cannot invent a role. |
+
+Accounts listed here are **Clerk accounts**. The list at
+**Administration → Customers** is MongoDB records from the GraphQL API — a
+separate set of people with no Clerk id and no role. Changing a role has nothing
+to do with that page.
+
+> **Security note.** `/admin/access` is protected in three places — the proxy,
+> the `admin` segment layout, and the page itself — but none of those is what
+> protects the *change*. `setRole` is a server action, which compiles to a public
+> POST endpoint any signed-in user can call directly, so it re-checks
+> `requireRole('admin')` itself on every invocation. If you add another
+> role-mutating action, it must do the same; hiding the UI is not protection.
+
+You can still edit `public_metadata` directly in the Dashboard at any time —
+`{ "role": "user" }` for a regular account, or leave it empty, which behaves the
+same as `user`.
 
 ### Role changes are not instant
 
 Clerk session tokens are short-lived and refresh automatically, so a metadata
-change reaches the app on the next refresh rather than immediately. To apply it
-right away, sign out and back in. If you change your own role and the app still
-behaves as before, this is why.
+change reaches the app on the next refresh — up to about a minute — rather than
+immediately. Signing out and back in applies it at once.
+
+**A promoted user also has to reload before the sidebar changes.** The role is
+resolved in the `(app)` layout, and Next renders a layout once per full page
+load; client-side navigation reuses it. So a new admin can reach `/admin/access`
+by URL — `requireRole` reads the fresh token server-side — while their sidebar
+still shows no Administration section. That is not a bug, and
+`revalidatePath` cannot fix it: it does not reach another user's browser. A hard
+reload does.
 
 ---
 
@@ -174,8 +213,13 @@ TypeScript will point at everything that needs updating.
 | `src/lib/auth/access.ts` | The policy: public paths, admin paths, the decision. |
 | `src/lib/auth/roles.ts` | Role vocabulary and safe session-claim parsing. |
 | `src/lib/auth/requireRole.ts` | Server-side guards for pages and layouts. |
+| `src/lib/auth/users.ts` | The only module that calls Clerk's Backend API — lists accounts, writes a role. Carries no authorization itself. |
+| `src/lib/auth/setRole.ts` | The guarded server action. **The security boundary for a role change.** |
+| `src/lib/auth/roleChange.ts` | The action's result shape and messages. Separate because a `'use server'` file may export only async functions. |
 | `src/types/globals.d.ts` | Types the session token's `metadata.role`. |
 | `src/app/(app)/admin/layout.tsx` | Applies `requireRole("admin")` to `/admin/*`. Guard only — chrome comes from the `(app)` group. |
+| `src/app/(app)/admin/access/page.tsx` | Role management. Resolves identity and loads accounts, then hands off to the table. |
+| `src/components/access/AccessTable.tsx` | The role table's interactive half. No fetching, no authorization. |
 | `src/components/layout/DefaultLayout.tsx` | Reads the role to filter navigation. Display only, **not** enforcement. |
 | `src/components/auth/SignInPanel.tsx` | The custom-styled sign-in page. |
 
@@ -197,7 +241,11 @@ TypeScript will point at everything that needs updating.
 | --- | --- |
 | A real admin is redirected away from `/admin/*` | The session token claim isn't configured — see [above](#required-clerk-dashboard-setup) |
 | A role change had no effect | Token hasn't refreshed yet; sign out and back in |
+| A promoted user can open `/admin/access` but has no Administration sidebar | Expected. The `(app)` layout renders once per page load — they need a hard reload. See [above](#role-changes-are-not-instant) |
+| Every account shows "no role" on `/admin/access` | Their `public_metadata` really is empty — distinct from the claim problem above, which hides the role from the *token* |
+| The Role dropdown is greyed out on one row | That row is you. Your own role is locked by design |
 | Sign-in shows Clerk's hosted page, not the styled one | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` missing from `.env.local` |
+| `The <SignIn/> component is not configured correctly` | `/sign-in` must stay an optional catch-all, `sign-in/[[...rest]]/page.tsx` — Clerk serves its own sub-routes beneath it |
 | Signed out and stuck in a redirect loop | `/sign-in` was removed from `PUBLIC_PATHS` |
 | Every route redirects to sign-in when signed in | Clerk keys missing or from the wrong Clerk instance |
 
@@ -215,6 +263,18 @@ cases where the role claim is absent or malformed. Both the proxy and the
 resource guard are tested independently, so neither layer can silently stop
 enforcing.
 
+Role assignment is covered separately, in `src/lib/auth/setRole.test.ts`:
+authorization before argument validation, self-change refused, unrecognised and
+non-string roles refused, Clerk's error text not leaked, and nothing revalidated
+when a write fails.
+
+**Two things tests here cannot catch**, both learned the hard way:
+- **Route-file placement.** `/sign-in` must be an optional catch-all; a plain
+  `page.tsx` compiles and passes every test, then fails in the browser.
+- **`'use server'` export rules.** A file exporting anything but async functions
+  fails the build — but only once something imports it. An unreferenced action
+  compiles clean.
+
 ---
 
 ## Known gaps
@@ -225,5 +285,20 @@ enforcing.
   backend work.
 - **No `/sign-up` route.** Clerk's widget shows a sign-up link that has nowhere
   to go; it bounces back to sign-in. Create accounts from the Dashboard.
-- **No audit trail on role changes.** Roles are edited by hand in the Clerk
-  Dashboard, and nothing in the app records who changed what.
+- **No audit trail on role changes.** `/admin/access` writes the new role and
+  nothing else — who changed it, and when, is not recorded anywhere.
+- **Concurrent mutual demotion can leave zero admins.** Self-changes are
+  refused, so *sequential* changes can never empty the admin set — it shrinks at
+  most to whoever is making the change. But if two admins demote each other at
+  the same moment, neither request is a self-change, both pass, and both
+  succeed. Recovery is the Clerk Dashboard. A "would this leave zero admins?"
+  check is itself racy without a lock, so this is accepted for now rather than
+  half-solved.
+- **New accounts start with no role.** Nothing stamps a default, because there
+  is no `user.created` webhook and no sign-up route. Harmless today —
+  `satisfiesRole(undefined, 'user')` is true, so a role-less account reaches
+  every non-admin route — but it means `/admin/access` shows "no role" for every
+  new account until someone sets one.
+- **`/admin/access` does not paginate.** It fetches one page of 500 accounts
+  (Clerk's maximum) and warns when the directory is larger. Clerk's own default
+  is 10, which is why the limit is set explicitly.

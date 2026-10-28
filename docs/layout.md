@@ -11,8 +11,8 @@ Paths are relative to `frontend/`.
 ## 1. Which routes get the chrome
 
 The split is done with a **route group**, `src/app/(app)/`. Parentheses in an App
-Router directory name contribute **no URL segment**, so `(app)/admin/users` still
-serves `/admin/users`.
+Router directory name contribute **no URL segment**, so `(app)/admin/customers`
+still serves `/admin/customers`.
 
 ```
 src/app/
@@ -33,7 +33,9 @@ visitor should not be shown navigation they cannot use.
 One consequence worth knowing: the group layout calls `auth()` and `cookies()`, so
 **every page inside `(app)/` is server-rendered on demand** and cannot be
 statically prerendered. That is the unavoidable cost of a role-aware layout.
-`/sign-in`, outside the group, stays static.
+`/sign-in` sits outside the group but is dynamic too, for an unrelated reason:
+it is an optional catch-all (`[[...rest]]`), which Clerk's `<SignIn />`
+requires, and catch-alls are not prerendered.
 
 ---
 
@@ -116,8 +118,8 @@ looks finished and 404s when clicked.
 
 ### `exact`
 
-A nav `href` matches its whole subtree, so `/admin/users` stays highlighted on
-`/admin/users/42`. Set `exact: true` to match only the precise path. A root href
+A nav `href` matches its whole subtree, so `/admin/customers` stays highlighted on
+`/admin/customers/42`. Set `exact: true` to match only the precise path. A root href
 of `/` is **always** treated as exact, whether or not you set the flag — without
 that, Dashboard would prefix-match every path in the app and always look active.
 
@@ -158,6 +160,20 @@ everyone. That is why `RoleBadge` renders an explicit amber `no role` chip rathe
 than nothing: an empty sidebar with no explanation looks like a bug, and the chip
 names the cause. See
 [`auth.md`](./auth.md#required-clerk-dashboard-setup).
+
+### A role change does not update the sidebar until a reload
+
+The role is resolved **in this layout**, and Next renders a layout once per full
+page load — client-side navigation reuses it. So when someone is promoted at
+`/admin/access`, their sidebar keeps the old entries even after their session
+token catches up. The visible symptom is a new admin who can open `/admin/access`
+by URL, because `requireRole` reads the fresh token server-side, while their
+sidebar still shows no Administration section.
+
+This is the layout's caching, not a bug, and `revalidatePath` cannot fix it — it
+does not reach another user's browser. A hard reload, or signing out and back in,
+does. `AccessTable` says so after a successful change, so it doesn't read as a
+failure.
 
 ---
 
@@ -255,11 +271,11 @@ that, every test silently runs the mobile branch.
 - **Nothing has been verified in a real browser.** The layout is covered by tests
   and its markup checked server-side, but no one has looked at it at any viewport.
   The responsive rules in particular are untested.
-- **`/` and `/admin/users` render the same user list.** `(app)/page.tsx` is still a
-  verbatim copy of the admin users page, so the two routes look identical inside
+- **`/` and `/admin/customers` render the same list.** `(app)/page.tsx` is still a
+  verbatim copy of the admin customers page, so the two routes look identical inside
   identical chrome. `/` wants a real landing page.
-- **The nav registry has one real admin entry.** `Settings` is a placeholder;
-  anything else needs adding as pages get built.
+- **The nav registry has two real admin entries.** `Customers` and `Access`;
+  `Settings` is a placeholder. Anything else needs adding as pages get built.
 - **No breadcrumb for sub-pages.** The breadcrumb shows section and nav entry, so a
-  detail page like `/admin/users/42` reads as "Administration / Users" with nothing
-  identifying the record.
+  detail page like `/admin/customers/42` reads as "Administration / Customers" with
+  nothing identifying the record.
