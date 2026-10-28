@@ -86,18 +86,32 @@ describe('DefaultLayout, fully composed', () => {
   });
 
   describe('what each role actually sees', () => {
-    it('gives an admin a working link to the users page', async () => {
+    it('gives an admin a working link to the customers page', async () => {
       hoisted.role.current = 'admin';
       await renderPage();
 
-      expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('href', '/admin/users');
+      expect(screen.getByRole('link', { name: 'Customers' })).toHaveAttribute(
+        'href',
+        '/admin/customers',
+      );
+    });
+
+    it('gives an admin a working link to the access page', async () => {
+      hoisted.role.current = 'admin';
+      await renderPage();
+
+      expect(screen.getByRole('link', { name: 'Access' })).toHaveAttribute(
+        'href',
+        '/admin/access',
+      );
     });
 
     it('gives a plain user no admin link at all', async () => {
       hoisted.role.current = 'user';
       await renderPage();
 
-      expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Customers' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Access' })).not.toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Dashboard' })).toBeInTheDocument();
     });
 
@@ -105,7 +119,7 @@ describe('DefaultLayout, fully composed', () => {
       hoisted.role.current = undefined;
       await renderPage();
 
-      expect(screen.queryByRole('link', { name: 'Users' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Customers' })).not.toBeInTheDocument();
       expect(screen.getByText('no role')).toBeInTheDocument();
     });
 
@@ -121,10 +135,13 @@ describe('DefaultLayout, fully composed', () => {
   });
 
   it('highlights the nav entry matching the current page', async () => {
-    hoisted.pathname.current = '/admin/users';
+    hoisted.pathname.current = '/admin/customers';
     await renderPage();
 
-    expect(screen.getByRole('link', { name: 'Users' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByLabelText('Breadcrumb')).toHaveTextContent('Users');
+    expect(screen.getByRole('link', { name: 'Customers' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByLabelText('Breadcrumb')).toHaveTextContent('Customers');
   });
 });

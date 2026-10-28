@@ -97,7 +97,7 @@ describe('DefaultLayout', () => {
       hoisted.role.current = 'admin';
       await renderLayout();
 
-      expect(navIds()).toContain('users');
+      expect(navIds()).toContain('customers');
       expect(navIds()).toContain('dashboard');
     });
 
@@ -105,7 +105,7 @@ describe('DefaultLayout', () => {
       hoisted.role.current = 'user';
       await renderLayout();
 
-      expect(navIds()).not.toContain('users');
+      expect(navIds()).not.toContain('customers');
       expect(navIds()).toContain('dashboard');
     });
 
@@ -115,7 +115,7 @@ describe('DefaultLayout', () => {
       hoisted.role.current = undefined;
       await renderLayout();
 
-      expect(navIds()).not.toContain('users');
+      expect(navIds()).not.toContain('customers');
     });
   });
 
