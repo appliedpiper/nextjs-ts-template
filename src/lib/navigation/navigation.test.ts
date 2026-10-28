@@ -102,10 +102,28 @@ describe('visibleNavFor', () => {
     expect(JSON.stringify(fixture.map((s) => s.items.map((i) => i.id)))).toBe(before);
   });
 
-  it('hides the real registry Users entry from a non-admin', () => {
-    expect(idsIn(visibleNavFor('admin', NAV_SECTIONS))).toContain('users');
-    expect(idsIn(visibleNavFor('user', NAV_SECTIONS))).not.toContain('users');
-    expect(idsIn(visibleNavFor(undefined, NAV_SECTIONS))).not.toContain('users');
+  it('hides the real registry Customers entry from a non-admin', () => {
+    expect(idsIn(visibleNavFor('admin', NAV_SECTIONS))).toContain('customers');
+    expect(idsIn(visibleNavFor('user', NAV_SECTIONS))).not.toContain('customers');
+    expect(idsIn(visibleNavFor(undefined, NAV_SECTIONS))).not.toContain('customers');
+  });
+
+  it('hides the real registry Access entry from a non-admin', () => {
+    // The role-management page. Visibility is cosmetic — `requireRole` in the
+    // page and in the `setRole` action are the real gates — but a non-admin
+    // should not be told the route exists.
+    expect(idsIn(visibleNavFor('admin', NAV_SECTIONS))).toContain('access');
+    expect(idsIn(visibleNavFor('user', NAV_SECTIONS))).not.toContain('access');
+    expect(idsIn(visibleNavFor(undefined, NAV_SECTIONS))).not.toContain('access');
+  });
+
+  it('leaves a non-admin no Administration section at all', () => {
+    // Every item in that section is admin-only, so filtering must drop the
+    // section rather than leave an empty "Administration" subheader behind.
+    const sectionIds = visibleNavFor('user', NAV_SECTIONS).map((section) => section.id);
+
+    expect(sectionIds).not.toContain('administration');
+    expect(sectionIds).toEqual(['overview']);
   });
 });
 
@@ -224,8 +242,17 @@ describe('findActiveItem', () => {
   });
 
   it('searches the real registry', () => {
-    expect(findActiveItem('/admin/users', NAV_SECTIONS)?.label).toBe('Users');
+    expect(findActiveItem('/admin/customers', NAV_SECTIONS)?.label).toBe('Customers');
+    expect(findActiveItem('/admin/access', NAV_SECTIONS)?.label).toBe('Access');
     expect(findActiveItem('/', NAV_SECTIONS)?.label).toBe('Dashboard');
+  });
+
+  it('keeps the two admin entries distinct, despite the shared /admin prefix', () => {
+    // Regression guard: a prefix-only match would let one highlight the other.
+    expect(findActiveItem('/admin/access', NAV_SECTIONS)?.id).toBe('access');
+    expect(findActiveItem('/admin/customers', NAV_SECTIONS)?.id).toBe('customers');
+    // A sibling that is neither matches nothing rather than the first /admin item.
+    expect(findActiveItem('/admin/accessibility', NAV_SECTIONS)).toBeUndefined();
   });
 });
 

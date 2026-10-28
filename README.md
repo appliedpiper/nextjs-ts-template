@@ -100,7 +100,20 @@ without flashing. Documented in [`docs/layout.md`](./docs/layout.md), including 
 to add an entry and why hiding a link is **not** the same as protecting a route.
 
 **Admin area.** `/admin/*` requires the `admin` role, enforced at the edge and
-again in the segment's own layout. `/admin/users` lists users from the backend.
+again in the segment's own layout. `/admin/customers` lists customer records from
+the GraphQL backend.
+
+**Role management.** `/admin/access` lists every Clerk account with its current
+role and a dropdown to change it, so promoting a colleague no longer means opening
+the Clerk Dashboard. Your own row is locked, so an admin cannot demote themselves
+and leave the portal with no admin. The change is written by a server action that
+re-checks `requireRole('admin')` itself — hiding the page is not what protects it.
+Bootstrapping the *first* admin still has to be done in the Dashboard; see
+[`docs/auth.md`](./docs/auth.md#assigning-a-role-to-a-user).
+
+> `/admin/access` manages **Clerk accounts**. `/admin/customers` lists **MongoDB
+> records** from the GraphQL API — a separate set of people, with no Clerk id and
+> no role. The two are unrelated.
 
 **Typed GraphQL data layer.** TanStack Query hooks call an internal
 `/api/graphql` route handler, which forwards to the real GraphQL server. The
@@ -111,15 +124,19 @@ browser never talks to the backend directly.
 | Route | Access | What it shows |
 | --- | --- | --- |
 | `/sign-in` | Public | Custom-styled Clerk sign-in — deliberately **no** app chrome |
-| `/` | Any signed-in user | User list, inside the app layout |
-| `/admin/users` | `admin` only | User list, inside the app layout |
+| `/` | Any signed-in user | Customer list, inside the app layout |
+| `/admin/customers` | `admin` only | Customer records from MongoDB, inside the app layout |
+| `/admin/access` | `admin` only | Clerk accounts and their roles, with a dropdown to change them |
 
 Routes that should render inside the app layout live under `src/app/(app)/`. The
-parentheses make it a route group, which adds **no URL segment** — `(app)/admin/users`
-serves `/admin/users`. `/sign-in` sits outside the group.
+parentheses make it a route group, which adds **no URL segment** —
+`(app)/admin/customers` serves `/admin/customers`. `/sign-in` sits outside the
+group.
 
 Every route inside the group is server-rendered on demand, because the layout reads
-the session and a cookie. `/sign-in` stays static.
+the session and a cookie. `/sign-in` is dynamic too — it must be an optional
+catch-all (`sign-in/[[...rest]]/page.tsx`) because Clerk's `<SignIn />` serves its
+own sub-routes beneath it, and catch-alls are not prerendered.
 
 There is no `/sign-up` route yet — create accounts from the Clerk Dashboard.
 
@@ -134,8 +151,10 @@ src/
 │   │   ├── page.tsx        #   /
 │   │   └── admin/          #   /admin/* — admin-only segment (guard only)
 │   ├── sign-in/            # /sign-in — outside the group, so no chrome
+│   │   └── [[...rest]]/    #   optional catch-all; required by Clerk's <SignIn />
 │   └── api/graphql/        # Route handler forwarding to the GraphQL backend
 ├── components/
+│   ├── access/             # AccessTable — the role-management table
 │   ├── auth/               # SignInPanel
 │   ├── layout/             # DefaultLayout, AppShell, AppHeader, AppSidebar
 │   └── Users/              # Feature components
@@ -176,7 +195,7 @@ See [`docs/layout.md`](./docs/layout.md#7-testing-notes).
 
 ## Documentation
 
-- [`docs/auth.md`](./docs/auth.md) — auth flow, roles, assigning roles, adding protected routes
+- [`docs/auth.md`](./docs/auth.md) — auth flow, roles, bootstrapping the first admin, assigning roles at `/admin/access`, adding protected routes
 - [`docs/layout.md`](./docs/layout.md) — the app layout, adding nav entries, role visibility, sidebar behaviour
 - [`docs/auth-component-flow.md`](./docs/auth-component-flow.md) — diagrams of the request lifecycle and component tree
 
@@ -189,10 +208,20 @@ This is a POC. Deliberately unfinished:
   still query it.
 - **No `/sign-up` route.** Accounts are created from the Clerk Dashboard, and
   nothing assigns a role at creation — a new account is role-less until someone
-  sets `public_metadata` by hand.
-- **The layout has not been checked in a real browser**, at any viewport. It is
-  covered by tests and verified server-side, but the responsive behaviour is
-  unproven.
-- **`/` duplicates `/admin/users`.** Both render the same user list inside the same
+  sets it, now most easily at `/admin/access`. Role-less accounts can still reach
+  every non-admin route, so this is cosmetic rather than a lockout.
+- **No audit trail on role changes.** `/admin/access` writes the new role and
+  records nothing about who changed it, or when.
+- **Concurrent mutual demotion can leave zero admins.** Self-changes are refused,
+  so *sequential* changes can never empty the admin set. But two admins demoting
+  each other simultaneously are each making a non-self change, so both succeed.
+  Recovery is the Clerk Dashboard. Accepted rather than half-solved — a
+  "would this leave zero admins?" check is itself racy without a lock.
+- **`/admin/access` does not paginate.** One page of up to 500 accounts (Clerk's
+  maximum), with a warning when the directory is larger.
+- **The layout has not been checked at every viewport.** `/admin/access` has been
+  exercised in a browser with two real accounts; the layout's responsive
+  behaviour is still only covered by tests.
+- **`/` duplicates `/admin/customers`.** Both render the same list inside the same
   chrome; `/` wants a real landing page.
 - **No CI, staging environment, or API rate limiting.**

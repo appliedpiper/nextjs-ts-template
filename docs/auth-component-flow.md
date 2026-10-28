@@ -67,7 +67,7 @@ flowchart TD
     PROVIDERS["Providers<br/>src/components/Providers.tsx"]
     THEME["MUI theme<br/>src/lib/theme.ts"]
 
-    SIGNINPAGE["/sign-in — Page, outside (app)<br/>src/app/sign-in/page.tsx"]
+    SIGNINPAGE["/sign-in — Page, outside (app)<br/>src/app/sign-in/[[...rest]]/page.tsx"]
     PANEL["SignInPanel, client<br/>src/components/auth/SignInPanel.tsx"]
     WIDGET["Clerk SignIn widget<br/>appearance derived from the MUI theme"]
 
@@ -81,8 +81,13 @@ flowchart TD
 
     ADMINGUARD["/admin/* — AdminSegmentLayout<br/>src/app/(app)/admin/layout.tsx"]
     GUARD["requireRole admin<br/>src/lib/auth/requireRole.ts"]
-    ADMINPAGE["Page<br/>src/app/(app)/admin/users/page.tsx"]
+    ADMINPAGE["Page<br/>src/app/(app)/admin/customers/page.tsx"]
     USERS2["Users, client"]
+
+    ACCESSPAGE["Page<br/>src/app/(app)/admin/access/page.tsx"]
+    LISTUSERS["listUsers<br/>src/lib/auth/users.ts → Clerk BAPI"]
+    ACCESSTABLE["AccessTable, client"]
+    SETROLE["setRole, server action<br/>re-checks requireRole admin"]
 
     LAYOUT --> PROVIDERS
     PROVIDERS -.-> THEME
@@ -103,7 +108,17 @@ flowchart TD
     ADMINGUARD --> GUARD
     ADMINGUARD --> ADMINPAGE
     ADMINPAGE --> USERS2
+
+    ADMINGUARD --> ACCESSPAGE
+    ACCESSPAGE -.-> LISTUSERS
+    ACCESSPAGE --> ACCESSTABLE
+    ACCESSTABLE -.-> SETROLE
+    SETROLE -.-> GUARD
 ```
+
+The dotted line from `setRole` back to `requireRole` is the point: the action
+does not inherit the page's guard. It is reachable as its own POST endpoint, so
+it repeats the check itself.
 
 Note that `AdminSegmentLayout` is now **only a guard** — it calls `requireRole`
 and renders its children. The chrome comes from the `(app)` group above it, so
@@ -113,21 +128,37 @@ there is no longer a separate admin layout component.
 
 | Route | Access | What renders | Entry file |
 | --- | --- | --- | --- |
-| `/sign-in` | Public — the only route reachable without a session | Clerk's widget centred in the viewport, restyled to the MUI theme. **No app chrome.** | `src/app/sign-in/page.tsx` |
-| `/` | Any signed-in user; the role claim is not consulted | The user list inside the app layout | `src/app/(app)/page.tsx` |
-| `/admin/users` | `admin` only, checked at the proxy *and* in the segment layout | The user list inside the app layout, with Users highlighted in the sidebar | `src/app/(app)/admin/users/page.tsx` |
+| `/sign-in` | Public — the only route reachable without a session | Clerk's widget centred in the viewport, restyled to the MUI theme. **No app chrome.** | `src/app/sign-in/[[...rest]]/page.tsx` |
 
-`/sign-in` is prerendered as static. **Everything inside `(app)` renders
-dynamically**, because the group layout calls both `auth()` and `cookies()` — so
-`/` is now dynamic too, where it used to be static.
+`/sign-in` is an **optional catch-all** (`[[...rest]]`), and has to be. Clerk's
+`<SignIn />` uses path-based routing and serves its own sub-routes — factor-one,
+sso-callback, forgot-password — beneath `/sign-in`; as a plain `page.tsx` it
+renders *"The `<SignIn/>` component is not configured correctly"*. The optional
+catch-all still serves `/sign-in` itself, so `SIGN_IN_PATH` is unchanged, and
+`PUBLIC_PATHS` already matches the whole subtree so the proxy lets the
+sub-routes through.
+| `/` | Any signed-in user; the role claim is not consulted | The user list inside the app layout | `src/app/(app)/page.tsx` |
+| `/admin/customers` | `admin` only, checked at the proxy *and* in the segment layout | The MongoDB customer list inside the app layout, with Customers highlighted in the sidebar | `src/app/(app)/admin/customers/page.tsx` |
+| `/admin/access` | `admin` only, at the proxy, the segment layout, **and** the page. The `setRole` action checks separately. | Every Clerk account with its role and a dropdown to change it; the signed-in admin's own row is locked | `src/app/(app)/admin/access/page.tsx` |
+
+**Everything inside `(app)` renders dynamically**, because the group layout calls
+both `auth()` and `cookies()` — so `/` is now dynamic too, where it used to be
+static. `/sign-in` is dynamic as well, since converting it to an optional
+catch-all means it can no longer be prerendered; it was static before that
+change.
 
 ---
 
 ## 3. The data path behind the user list
 
-`/` and `/admin/users` render the same `Users` component, so both follow this
+`/` and `/admin/customers` render the same `Users` component, so both follow this
 chain. The browser never talks to the GraphQL backend directly — it goes through
 an internal route handler.
+
+These are **MongoDB** records, not Clerk accounts. The component and hook keep
+the `Users` name because the backend GraphQL type is `User`; the route is named
+`customers` so it isn't mistaken for Clerk account management, which lives at
+`/admin/access`.
 
 ```mermaid
 flowchart LR
@@ -169,7 +200,26 @@ flowchart LR
 | roles | `src/lib/auth/roles.ts` | Policy and guards | Role vocabulary and safe claim parsing; unrecognised values resolve to no role. |
 | `requireRole` | `src/lib/auth/requireRole.ts` | `/admin/*` layout | Resource-level guard for server components, so the segment stays protected if the matcher changes. |
 | `getCurrentRole` | `src/lib/auth/requireRole.ts` | `(app)` group layout | Reads the role **without** redirecting, for deciding what to display. |
+| Clerk accounts | `src/lib/auth/users.ts` | `/admin/access` page | The only module that calls Clerk's Backend API: lists accounts, writes a role. **No authorization of its own.** |
+| `setRole` | `src/lib/auth/setRole.ts` | Server action (public POST) | The guarded entry point for a role change, and **the security boundary for it**. Re-checks `requireRole('admin')` every call. |
+| Role-change vocabulary | `src/lib/auth/roleChange.ts` | Both sides | Result shape and messages. A separate file because a `'use server'` module may export only async functions. |
 | Session claim types | `src/types/globals.d.ts` | Compile time | Declares the token's `metadata.role` shape — optional, because it is genuinely absent until configured. |
+
+### Two role parsers, deliberately
+
+`getRole` in `roles.ts` reads a **session claim**, where the metadata is nested
+under a `metadata` key. `roleFromMetadata` in `users.ts` reads `publicMetadata`
+straight off a Clerk account, with no such nesting. Neither accepts the other's
+input, and a test pins that — feeding one the other's shape returns no role,
+which would otherwise look like "this user has no role" rather than a bug.
+
+### Writing a role is not the same as reading one
+
+`requireRole` and `decideAccess` protect *routes*. They do not protect the
+*mutation*: `setRole` is a server action, which compiles to a public POST
+endpoint that any signed-in user can invoke directly with arguments of their
+choosing. Its own `requireRole('admin')` call is what stops that, and it is not
+a duplicate of the page's check. Any future role-mutating action needs the same.
 
 ### The layout also reads the role — for display only
 
@@ -180,8 +230,9 @@ Enforcement remains the proxy and `requireRole`. See
 [`layout.md`](./layout.md#4-role-visibility).
 
 Tests sit beside each module: `access.test.ts`, `roles.test.ts`,
-`requireRole.test.ts`, `src/proxy.test.ts`,
-`src/components/auth/SignInPanel.test.tsx`, and the layout suite under
+`requireRole.test.ts`, `users.test.ts`, `setRole.test.ts`, `src/proxy.test.ts`,
+`src/components/auth/SignInPanel.test.tsx`,
+`src/components/access/AccessTable.test.tsx`, and the layout suite under
 `src/components/layout/`. Run them with `pnpm test`.
 
 ---
@@ -208,6 +259,32 @@ one edit covers the edge and the resource.
 protecting it, and adding the guard alone protects a page nobody can find. See
 [`layout.md`](./layout.md#3-adding-a-navigation-entry).
 
+**Two constraints the test suite cannot enforce.** Both were found in the
+browser or the build, never by `pnpm test`:
+
+- **`'use server'` files may export only async functions.** A constant or a
+  re-exported value fails the build with *"Only async functions are allowed to
+  be exported in a 'use server' file"* — which is why `roleChange.ts` exists
+  separately from `setRole.ts`. The trap: **a build only validates action files
+  that something imports.** An unreferenced action compiles perfectly clean and
+  breaks the moment a page uses it.
+- **`/sign-in` must stay an optional catch-all** (`sign-in/[[...rest]]/`).
+  Clerk's `<SignIn />` uses path routing and serves factor-one, sso-callback,
+  and forgot-password beneath `/sign-in`. As a plain `page.tsx` it renders *"The
+  `<SignIn/>` component is not configured correctly"* at runtime while passing
+  every test.
+
+**Client components that call a server action must keep a stable DOM shape.**
+`setRole` calls `revalidatePath`, so Next replaces the page's subtree at the
+moment the action resolves — while the caller's `setState` is landing. A node
+inserted or removed in that tick can hit a parent React no longer owns, which
+WebKit reports as `NotFoundError: The object can not be found here` from
+`insertBefore`. `AccessTable` therefore mounts nothing in response to an action:
+its Select children are a fixed list, the row spinner is always present and
+toggles `visibility`, and feedback lives in one permanently mounted
+`role="status"` region. **Add feedback by changing content, not by
+conditionally rendering an element.**
+
 **The backend is still open.** These gates protect pages and the internal API
 route only. The GraphQL server has no token verification and remains directly
 reachable on port 4000, so a signed-out client can still query it. Tracked as
@@ -218,10 +295,11 @@ bounces back to sign-in. Create accounts from the Clerk Dashboard for now.
 
 **Two route-group moves have happened — URLs did not change the second time.**
 `/users` was once served by an `(admin)` route group whose parentheses added no URL
-segment; it is now genuinely `/admin/users`. Separately, `page.tsx` and `admin/`
+segment; it became genuinely `/admin/users`. Separately, `page.tsx` and `admin/`
 later moved into an `(app)` group to pick up the shared layout — that move changed
 **no** URLs, because `(app)` is also a group. Confirmed against the production
-route table.
+route table. The route has since been renamed again, to `/admin/customers`, this
+time a real URL change.
 
 **Defined but never imported.** Three files are unreferenced — left in place, but
 don't assume they're wired in:

@@ -14,6 +14,7 @@ import { satisfiesRole, type Role } from '@/lib/auth/roles';
 
 import type { NavIcon, NavItem, NavSection } from './types';
 
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CircleOutlinedIcon from '@mui/icons-material/CircleOutlined';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import PeopleIcon from '@mui/icons-material/People';
@@ -77,11 +78,24 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     id: 'administration',
     label: 'Administration',
     items: [
+      // Customers are MongoDB records from the GraphQL API. Deliberately *not*
+      // named "Users": roles live on Clerk accounts, which are a separate set of
+      // people with no link to these documents. See `/admin/access`.
       {
-        id: 'users',
-        label: 'Users',
-        href: '/admin/users',
+        id: 'customers',
+        label: 'Customers',
+        href: '/admin/customers',
         icon: PeopleIcon,
+        requiredRole: 'admin',
+      },
+      // Clerk accounts and their roles — the counterpart to Customers above.
+      // `requiredRole` only hides the entry; the page's own `requireRole` and
+      // the `setRole` action are what actually protect it.
+      {
+        id: 'access',
+        label: 'Access',
+        href: '/admin/access',
+        icon: AdminPanelSettingsIcon,
         requiredRole: 'admin',
       },
       // Carried over from the layout this replaced, which had a Settings entry
