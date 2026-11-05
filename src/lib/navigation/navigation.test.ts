@@ -117,6 +117,16 @@ describe('visibleNavFor', () => {
     expect(idsIn(visibleNavFor(undefined, NAV_SECTIONS))).not.toContain('access');
   });
 
+  it('hides the real registry GraphQL entry from a non-admin', () => {
+    // The admin-only GraphQL IDE. This one matters more than most: reads are
+    // not scoped per customer, so an IDE reaching a non-admin would be a tool
+    // for browsing every other customer's records. The real gates are
+    // `isAdminPath` in the proxy and `requireRole` in the page.
+    expect(idsIn(visibleNavFor('admin', NAV_SECTIONS))).toContain('graphql');
+    expect(idsIn(visibleNavFor('user', NAV_SECTIONS))).not.toContain('graphql');
+    expect(idsIn(visibleNavFor(undefined, NAV_SECTIONS))).not.toContain('graphql');
+  });
+
   it('leaves a non-admin no Administration section at all', () => {
     // Every item in that section is admin-only, so filtering must drop the
     // section rather than leave an empty "Administration" subheader behind.
@@ -247,12 +257,20 @@ describe('findActiveItem', () => {
     expect(findActiveItem('/', NAV_SECTIONS)?.label).toBe('Dashboard');
   });
 
-  it('keeps the two admin entries distinct, despite the shared /admin prefix', () => {
+  it('keeps the admin entries distinct, despite the shared /admin prefix', () => {
     // Regression guard: a prefix-only match would let one highlight the other.
     expect(findActiveItem('/admin/access', NAV_SECTIONS)?.id).toBe('access');
     expect(findActiveItem('/admin/customers', NAV_SECTIONS)?.id).toBe('customers');
-    // A sibling that is neither matches nothing rather than the first /admin item.
+    expect(findActiveItem('/admin/graphql', NAV_SECTIONS)?.id).toBe('graphql');
+    // A sibling that is none of them matches nothing rather than the first
+    // /admin item.
     expect(findActiveItem('/admin/accessibility', NAV_SECTIONS)).toBeUndefined();
+  });
+
+  it('does not confuse /admin/graphql with the /api/graphql route', () => {
+    // Different paths that share a last segment. The API route has no nav
+    // entry and must not light up the IDE page.
+    expect(findActiveItem('/api/graphql', NAV_SECTIONS)).toBeUndefined();
   });
 });
 

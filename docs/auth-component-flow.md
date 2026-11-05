@@ -167,9 +167,10 @@ flowchart LR
     K["userKeys<br/>src/lib/api/users/keys.ts"]
     Q["fetchUsers<br/>src/lib/api/users/queries.ts"]
     C["graphqlFetch<br/>src/lib/graphql/client.ts"]
-    R["POST /api/graphql<br/>src/app/api/graphql/route.ts"]
+    R["POST /api/graphql<br/>src/app/api/graphql/route.ts<br/>401 if no session; attaches Bearer token"]
     E["getServerEnv<br/>src/lib/env/server.ts"]
-    B["GraphQL backend, port 4000"]
+    A["auth()<br/>@clerk/nextjs/server"]
+    B["GraphQL backend, port 4000<br/>verifies the token, applies its own policy"]
 
     U --> H
     H -.-> K
@@ -177,6 +178,7 @@ flowchart LR
     Q --> C
     C --> R
     R -.-> E
+    R -.-> A
     R --> B
 ```
 
@@ -186,8 +188,9 @@ flowchart LR
 | `userKeys` | `src/lib/api/users/keys.ts` | Cache keys — `["users"]` and `["users", id]` |
 | `fetchUsers` | `src/lib/api/users/queries.ts` | Holds the GraphQL documents; types responses from the generated contract package |
 | `graphqlFetch` | `src/lib/graphql/client.ts` | POSTs to `/api/graphql`, unwraps errors and the data envelope |
-| Route handler | `src/app/api/graphql/route.ts` | Server-side forwarder to the real GraphQL server |
+| Route handler | `src/app/api/graphql/route.ts` | **Refuses without a session (401), then attaches the Clerk token as `Authorization: Bearer`** and forwards. Not a transparent proxy |
 | `getServerEnv` | `src/lib/env/server.ts` | Zod-validates `GRAPHQL_SERVER` before forwarding |
+| Backend | `backend/src/context/context.ts` | Verifies the token against Clerk's JWKS and applies its own per-field policy. Would refuse an unauthenticated request however it arrived |
 
 ---
 
@@ -285,10 +288,16 @@ toggles `visibility`, and feedback lives in one permanently mounted
 `role="status"` region. **Add feedback by changing content, not by
 conditionally rendering an element.**
 
-**The backend is still open.** These gates protect pages and the internal API
-route only. The GraphQL server has no token verification and remains directly
-reachable on port 4000, so a signed-out client can still query it. Tracked as
-the next task, not fixed here.
+**The backend is no longer open.** The GraphQL server verifies the Clerk session
+token on every resolver, so reaching port 4000 directly no longer bypasses auth.
+`src/app/api/graphql/route.ts` is part of that chain rather than a transparent
+proxy: it refuses unauthenticated calls with a **401 JSON** body — not the
+proxy's 307, which a `fetch` cannot use — and attaches the caller's token as
+`Authorization: Bearer` for the backend to verify. See `backend/docs/auth.md`.
+
+**What that does *not* cover:** any verified session can read every customer's
+users and orders. Those collections have no ownership field, so authentication
+here does not imply isolation.
 
 **No sign-up route.** Nothing serves `/sign-up`, so the widget's sign-up link
 bounces back to sign-in. Create accounts from the Clerk Dashboard for now.
