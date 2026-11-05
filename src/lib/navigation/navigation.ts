@@ -18,6 +18,7 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CircleOutlinedIcon from '@mui/icons-material/CircleOutlined';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import PeopleIcon from '@mui/icons-material/People';
+import TerminalIcon from '@mui/icons-material/Terminal';
 
 /**
  * Stand-in icon for an item whose page doesn't exist yet. Deliberately neutral
@@ -96,6 +97,16 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         label: 'Access',
         href: '/admin/access',
         icon: AdminPanelSettingsIcon,
+        requiredRole: 'admin',
+      },
+      // An admin-only GraphQL IDE, served from this origin so the browser's
+      // Clerk cookie authenticates it with no token handling. Disabled in
+      // production, where Apollo turns introspection off.
+      {
+        id: 'graphql',
+        label: 'GraphQL',
+        href: '/admin/graphql',
+        icon: TerminalIcon,
         requiredRole: 'admin',
       },
       // Carried over from the layout this replaced, which had a Settings entry

@@ -103,6 +103,11 @@ to add an entry and why hiding a link is **not** the same as protecting a route.
 again in the segment's own layout. `/admin/customers` lists customer records from
 the GraphQL backend.
 
+**GraphQL IDE.** `/admin/graphql` embeds Apollo Sandbox pointed at this app's own
+`/api/graphql`, so queries authenticate from your session cookie and there is no
+token to mint or paste. Admin-only, and disabled in production (Apollo turns off
+introspection there). See [`docs/auth.md`](./docs/auth.md#the-graphql-ide-at-admingraphql).
+
 **Role management.** `/admin/access` lists every Clerk account with its current
 role and a dropdown to change it, so promoting a colleague no longer means opening
 the Clerk Dashboard. Your own row is locked, so an admin cannot demote themselves
@@ -119,6 +124,12 @@ Bootstrapping the *first* admin still has to be done in the Dashboard; see
 `/api/graphql` route handler, which forwards to the real GraphQL server. The
 browser never talks to the backend directly.
 
+That route handler is also an **auth boundary**: it refuses requests without a
+Clerk session with a 401, and attaches the caller's session token as
+`Authorization: Bearer` so the backend can verify it. Every backend resolver
+requires that token — reads need any verified session, writes need `admin`. See
+[`backend/docs/auth.md`](../backend/docs/auth.md).
+
 ## Routes
 
 | Route | Access | What it shows |
@@ -127,6 +138,7 @@ browser never talks to the backend directly.
 | `/` | Any signed-in user | Customer list, inside the app layout |
 | `/admin/customers` | `admin` only | Customer records from MongoDB, inside the app layout |
 | `/admin/access` | `admin` only | Clerk accounts and their roles, with a dropdown to change them |
+| `/admin/graphql` | `admin` only | GraphQL IDE against `/api/graphql`, authenticated by your session cookie — no token to paste. Disabled in production |
 
 Routes that should render inside the app layout live under `src/app/(app)/`. The
 parentheses make it a route group, which adds **no URL segment** —
@@ -152,7 +164,7 @@ src/
 │   │   └── admin/          #   /admin/* — admin-only segment (guard only)
 │   ├── sign-in/            # /sign-in — outside the group, so no chrome
 │   │   └── [[...rest]]/    #   optional catch-all; required by Clerk's <SignIn />
-│   └── api/graphql/        # Route handler forwarding to the GraphQL backend
+│   └── api/graphql/        # Route handler: refuses without a session, attaches the Bearer token
 ├── components/
 │   ├── access/             # AccessTable — the role-management table
 │   ├── auth/               # SignInPanel
@@ -203,9 +215,14 @@ See [`docs/layout.md`](./docs/layout.md#7-testing-notes).
 
 This is a POC. Deliberately unfinished:
 
-- **The GraphQL backend has no token verification.** Protecting these pages does
-  nothing for it; it remains directly reachable and a signed-out client can
-  still query it.
+- ~~**The GraphQL backend has no token verification.**~~ **Closed.** The backend
+  verifies the Clerk session token on every resolver, so reaching port 4000
+  directly no longer bypasses auth. `src/app/api/graphql/route.ts` attaches the
+  caller's token and refuses unauthenticated calls with a 401.
+- **The GraphQL API is authenticated but not isolated.** Any signed-in account
+  can read **every** customer's users and orders — those collections have no
+  ownership field. Now the largest remaining gap, and a data-model change rather
+  than an auth one.
 - **No `/sign-up` route.** Accounts are created from the Clerk Dashboard, and
   nothing assigns a role at creation — a new account is role-less until someone
   sets it, now most easily at `/admin/access`. Role-less accounts can still reach
